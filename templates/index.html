@@ -52,9 +52,16 @@
 
 <h2>Date range</h2>
   <form action="/setrange" method="post">
-  <input type="text" name="daterange" size="12"
+  <input type="text" name="daterange" id="daterange" size="12"
     {% if session.daterange is defined %}
          value="{{session.daterange}}"
+    {% endif %}
+     class="pull-down"
+     style="background: #fff; cursor: pointer; padding: 5px 10px;
+     border: 1px solid #ccc; width: 12em" >
+  <input type="text" name="timerange" id= "timerange" size="12"
+    {% if session.timerange is defined%}
+         value="{{session.timerange}}"
     {% endif %}
      class="pull-down"
      style="background: #fff; cursor: pointer; padding: 5px 10px;
@@ -85,11 +92,12 @@
     shown in each row (but the order is across then down; I would
     prefer down then across). 
     -->
+<form action="/setcheck" method="post">
 {% if session.calendars is defined  %}
-  <div class="row">
+  <div class="col-md-4">
   {% for cal in session.calendars if cal.selected %}
-          <div class="col-md-4">
-	   {{ cal.summary }}
+          <div class="row">
+	   <input type="checkbox" name="box" value="{{cal.id}}" {% if cal.checked %} checked="Checked" {% endif %}>{{ cal.summary }}
           </div>
          {% if loop.index is divisibleby 3 %}
           </div> <div class="row">
@@ -97,7 +105,41 @@
   {% endfor %}
   </div>
 {% endif %}
-    
-
+<button type="button" id="check" name="check" onclick="fn()">Check</button>
+</form>
   </div>  <!-- container (for bootstrap) -->
+{% if session.events is defined %}
+  <ul>
+  {% for ev in session.events %}
+	   <li>"{{ev}}"</li>
+  {% endfor %}
+  </ul>
+{% endif %}
+
+<script>
+function fn(){
+   var boxes = document.getElementsByName('box');
+   var cal_ids = '';
+   var d_range =document.getElementById('daterange').value;
+   var t_range =document.getElementById('timerange').value;
+   for(var i = 0; i < boxes.length; i++){
+      if(boxes[i].checked){
+         if (cal_ids.length > 0){
+            cal_ids = cal_ids.concat(" ");
+         }
+         cal_ids = cal_ids.concat(boxes[i].value);
+      }
+   }
+   $.getJSON( "/_check_apt", { date: d_range, time: t_range, calen: cal_ids}, 
+              function(data) {
+                var res = data.result;
+                alert(res.message);
+                location.reload();
+              }
+          );
+}
+$("#add").click(function(){
+});
+</script>
+
   </body> </html>

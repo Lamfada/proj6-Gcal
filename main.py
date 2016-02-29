@@ -2,10 +2,13 @@ import flask
 from flask import render_template
 from flask import request
 from flask import url_for
+from flask import jsonify
 import uuid
 
 import json
 import logging
+
+import ast
 
 # Date handling 
 import arrow # Replacement for datetime, based on moment.js
@@ -60,6 +63,16 @@ def choose():
     app.logger.debug("Returned from get_gcal_service")
     flask.session['calendars'] = list_calendars(gcal_service)
     return render_template('index.html')
+
+@app.route("/check")
+def check():
+    #
+    app.logger.debug("Checking credentials for Google calendar access")
+    credentials = valid_credentials()
+    if not credentials:
+      app.logger.debug("Redirecting to authorization")
+      return flask.redirect(flask.url_for('oauth2callback'))
+    app.logger.debug("Start Check")
 
 ####
 #
@@ -194,7 +207,95 @@ def setrange():
     app.logger.debug("Setrange parsed {} - {}  dates as {} - {}".format(
       daterange_parts[0], daterange_parts[1], 
       flask.session['begin_date'], flask.session['end_date']))
+    timerange = request.form.get('timerange')
+    flask.session['timerange'] = timerange
+    timerange_parts = timerange.split()
+    flask.session['begin_time'] = interpret_time(timerange_parts[0])
+    flask.session['end_time'] = interpret_time(timerange_parts[2])
     return flask.redirect(flask.url_for("choose"))
+
+
+@app.route('/_check_apt')
+def check_apt():
+    """
+    User chose a date range with the bootstrap daterange
+    widget.
+    """
+
+    credentials = valid_credentials()
+    if not credentials:
+      app.logger.debug("Redirecting to authorization")
+      return flask.redirect(flask.url_for('oauth2callback'))
+    gcal_service = get_gcal_service(credentials)
+    try:
+        app.logger.debug("ENTERING check")
+        daterange = request.args.get("date", type=str)
+        timerange = request.args.get("time", type=str)
+        idlist = request.args.get("calen", type=str)
+        dates = daterange.split()
+        times = timerange.split()
+        ids = idlist.split()
+        flask.session['daterange'] = daterange
+        flask.session['timerange'] = timerange
+        flask.session['events'] = []
+        apts = []
+        startdate = interpret_date(dates[0])
+        enddate = interpret_date(dates[2])
+        starttime = interpret_time(times[0])
+        endtime = interpret_time(times[2])
+        beginnings = []
+        endings = []
+        d= list(startdate)
+        d[11] = starttime[11]
+        d[12] = starttime[12]
+        d[14] = starttime[14]
+        d[15] = starttime[15]
+        d[17] = starttime[17]
+        d[18] = starttime[18]
+        s = ''.join(d)
+        d[11] = endtime[11]
+        d[12] = endtime[12]
+        d[14] = endtime[14]
+        d[15] = endtime[15]
+        d[17] = endtime[17]
+        d[18] = endtime[18]
+        e = ''.join(d)
+        print(startdate<enddate)
+        print(enddate<startdate)
+        apts.append([s,s]) #starting 
+        while(startdate <= enddate):
+            beginnings.append(s)
+            endings.append(e)
+            startdate = next_day(startdate)
+            s = next_day(s)
+            apts.append([e,s]) #block all time in between days
+            e = next_day(e)
+        apts.append([e,e])
+        for i in range(len(beginnings)):
+            print()
+            print(beginnings[i])
+            print(endings[i])
+            now = datetime.datetime.utcnow().isoformat()
+            for cal in ids:
+                eventsResult =gcal_service.events().list(calendarId=cal, timeMin=beginnings[i], timeMax=endings[i],singleEvents=True,orderBy='startTime').execute()
+                for event in eventsResult['items']:
+                    try:
+                        event['transparency']# Will do nothing if the event is transparent
+                        # otherwise it triggers the except and the event is added to apts
+                    except:
+                        apts.append([event['start']['dateTime'],event['end']['dateTime']])
+                    print(event)
+            apts.sort()
+            free = []
+            for i in range(len(apts)-1):
+                if (apts[i+1][0]>apts[i][1]): #if there's a gap between the current appointment and the next
+                    free.append([apts[i][1],apts[i+1][0]])
+            for element in free:
+                flask.session['events'].append(element)
+        print()
+    except:
+        pass
+    return jsonify(result={"message":"message"})
 
 ####
 #
@@ -219,6 +320,7 @@ def init_session_values():
     # Default time span each day, 8 to 5
     flask.session["begin_time"] = interpret_time("9am")
     flask.session["end_time"] = interpret_time("5pm")
+    flask.session["timerange"] = str(arrow.get(flask.session["begin_time"]).time()) +" - "+str(arrow.get(flask.session["end_time"]).time()) 
 
 def interpret_time( text ):
     """
@@ -230,7 +332,7 @@ def interpret_time( text ):
     app.logger.debug("Decoding time '{}'".format(text))
     time_formats = ["ha", "h:mma",  "h:mm a", "H:mm"]
     try: 
-        as_arrow = arrow.get(text, time_formats).replace(tzinfo=tz.tzlocal())
+        as_arrow = arrow.get(text, time_formats)#.replace(tzinfo='local')
         app.logger.debug("Succeeded interpreting time")
     except:
         app.logger.debug("Failed to interpret time")
@@ -238,6 +340,7 @@ def interpret_time( text ):
               .format(text))
         raise
     return as_arrow.isoformat()
+
 
 def interpret_date( text ):
     """
